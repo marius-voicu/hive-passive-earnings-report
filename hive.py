@@ -1,27 +1,34 @@
+import streamlit as st
 import requests
 from datetime import datetime
 import pandas as pd
 
-def fetch_passive_income():
-    print("=== Universal Hive Passive Earnings Extractor ===")
-    
-    account_name = input("Enter your Hive username [default: steemmillionaire]: ").strip()
-    if not account_name:
-        account_name = "steemmillionaire"
-        
-    start_str = input("Enter start date (YYYY-MM-DD) [default: 60 days ago]: ").strip()
-    end_str = input("Enter stop date (YYYY-MM-DD) [default: today]: ").strip()
-    
-    end_date = datetime.strptime(end_str, "%Y-%m-%d") if end_str else datetime.now()
-    start_date = datetime.strptime(start_str, "%Y-%m-%d") if start_str else datetime.fromordinal(end_date.toordinal() - 60)
-    
-    print(f"\nFetching transactions for @{account_name} from {start_date.date()} to {end_date.date()}...\n")
+# Page Configuration
+st.set_page_config(page_title="Hive Passive Earnings Report", page_icon="🪙", layout="centered")
 
-    # Known sources
-    known_sources = ["tokenpimp", "eds-pay", "edsi-pay"]
-    print(f"Default known passive sources: {known_sources}")
-    print("Universal Discovery Mode active (using generic financial keywords only).")
-    
+st.title("🪙 Hive Passive Earnings Extractor")
+st.markdown("Fetch, analyze, and discover passive income payouts directly from the **Hive blockchain**.")
+
+# Sidebar Inputs for User Configuration
+st.sidebar.header("Configuration")
+account_name = st.sidebar.text_input("Hive Username", value="steemmillionaire").strip()
+
+# Date range selection
+default_end = datetime.now()
+default_start = datetime.fromordinal(default_end.toordinal() - 60)
+
+start_date = st.sidebar.date_input("Start Date", value=default_start)
+end_date = st.sidebar.date_input("End Date", value=default_end)
+
+# Convert dates to datetime objects for comparison
+start_dt = datetime.combine(start_date, datetime.min.time())
+end_dt = datetime.combine(end_date, datetime.max.time())
+
+# Known sources
+known_sources = ["tokenpimp", "eds-pay", "edsi-pay"]
+
+# Automatically run when the page loads or inputs change
+with st.spinner(f"Querying Hive node for @{account_name}..."):
     url = "https://api.hive.blog"
     payload = {
         "jsonrpc": "2.0",
@@ -30,21 +37,18 @@ def fetch_passive_income():
         "id": 1
     }
     
-    print("Querying Hive blockchain node...")
     try:
         response = requests.post(url, json=payload)
         result = response.json()
         if "result" not in result:
-            print("Error from Hive node:", result)
-            return
+            st.error(f"Error from Hive node: {result}")
+            st.stop()
         history = result["result"]
     except Exception as e:
-        print(f"Connection error: {e}")
-        return
+        st.error(f"Connection error: {e}")
+        st.stop()
 
     extracted_records = []
-    
-    # Strictly generic passive income keywords (brand names removed)
     passive_keywords = ["stake", "reward", "payout", "dividend", "holding", "ranked"]
 
     for item in history:
@@ -58,7 +62,7 @@ def fetch_passive_income():
         except ValueError:
             continue
             
-        if tx_date < start_date or tx_date > end_date:
+        if tx_date < start_dt or tx_date > end_dt:
             continue
             
         op = tx_data.get("op", ["unknown", {}])
@@ -85,30 +89,25 @@ def fetch_passive_income():
                     })
 
     if not extracted_records:
-        print("\nNo passive reward transactions found in this date range.")
-        return
-
-    df = pd.DataFrame(extracted_records)
-    df['numeric_amount'] = df['amount'].apply(lambda x: float(x.split()[0]))
-    
-    print("\n" + "="*50)
-    print("--- DETAILED PASSIVE TRANSACTIONS ---")
-    print("="*50)
-    print(df[['date', 'source', 'amount', 'memo']].to_string(index=False))
-    
-    print("\n" + "="*50)
-    print("--- EXECUTIVE SUMMARY BY SOURCE ---")
-    print("="*50)
-    summary = df.groupby('source')['numeric_amount'].agg(
-        Total_Earned='sum',
-        Transaction_Count='count'
-    )
-    summary['Share (%)'] = (summary['Total_Earned'] / summary['Total_Earned'].sum()) * 100
-    print(summary.round(4).to_string())
-    
-    grand_total = df['numeric_amount'].sum()
-    print(f"\nGrand Total Passive Earnings: {grand_total:.3f} HIVE")
-    print("="*50)
-
-if __name__ == "__main__":
-    fetch_passive_income()
+        st.warning("No passive reward transactions found in this date range.")
+    else:
+        df = pd.DataFrame(extracted_records)
+        df['numeric_amount'] = df['amount'].apply(lambda x: float(x.split()[0]))
+        
+        grand_total = df['numeric_amount'].sum()
+        
+        # Display Metric Header
+        st.metric(label="Grand Total Passive Earnings", value=f"{grand_total:.3f} HIVE")
+        
+        # Executive Summary Section
+        st.subheader("📊 Executive Summary by Source")
+        summary = df.groupby('source')['numeric_amount'].agg(
+            Total_Earned='sum',
+            Transaction_Count='count'
+        )
+        summary['Share (%)'] = (summary['Total_Earned'] / summary['Total_Earned'].sum()) * 100
+        st.dataframe(summary.round(4), use_container_width=True)
+        
+        # Detailed Transactions Section
+        st.subheader("📜 Detailed Passive Transactions")
+        st.dataframe(df[['date', 'source', 'amount', 'memo']], use_container_width=True)
